@@ -1,0 +1,98 @@
+apply plugin: "java"
+apply plugin: "eclipse"
+
+archivesBaseName = "pretty-json"
+version = "0.1"
+
+sourceCompatibility = 1.5
+targetCompatibility = 1.5
+
+repositories { 
+  mavenCentral()
+  flatDir name: "buildDeps", dirs: "buildDeps"
+}
+
+configurations {
+  antlr
+  jarjar
+}
+
+sourceSets {
+  gen
+}
+
+dependencies {
+  compile("org.antlr:antlr-runtime:3.3") { 
+    exclude module: "stringtemplate"
+  }
+  genCompile configurations.compile
+  testCompile "junit:junit:4.8.2"
+  testCompile "com.google.guava:guava:10.0.1"
+  antlr "org.antlr:antlr:3.3"
+  jarjar "jarjar:jarjar:1.1"
+}
+
+// Add generated sources to main's compile classpath.
+sourceSets.main.compileClasspath += sourceSets.gen.output
+
+// Add generated sources to test's runtime classpath.
+sourceSets.test.runtimeClasspath += sourceSets.gen.output
+
+task createWrapper(type: Wrapper) {
+    gradleVersion = "1.0-milestone-6"
+}
+
+antlrInput = "src/gen/resources"
+antlrOutput = "src/gen/java"
+
+task generateGrammarSource {
+  description = "Generates Java sources from an ANTLR 3 grammar"
+  inputs.dir file(antlrInput)
+  outputs.dir file(antlrOutput)
+} << {
+  mkdir(antlrOutput)
+  def grammars = fileTree(antlrInput).include("**/*.g")
+  ant.java(classname: "org.antlr.Tool", classpath: configurations.antlr.asPath, fork: true) {
+   arg(line: "-o ${antlrOutput}/de/martido/prettyjson/parser")
+   arg(line: grammars.files.join(" "))
+  }
+}
+
+task jarjar(type: Jar, dependsOn: jar) {
+  description = "Repackage external dependencies and embed them into the distribution"
+  classifier = "with-deps"
+} << {
+  ant {
+    taskdef(name: "jarjar", 
+      classname: "com.tonicsystems.jarjar.JarJarTask", 
+      classpath: configurations.jarjar.asPath)
+    jarjar(jarfile: archivePath, update: true) {
+      fileset dir: sourceSets.main.output.classesDir
+      fileset dir: sourceSets.gen.output.classesDir
+      configurations.compile.files.each { file -> zipfileset(src: file) }
+      rule pattern: "org.antlr.runtime.**", result: "repackaged.@0"
+    }
+  }
+}
+
+task sourcesJar(type: Jar, dependsOn: classes) {
+  description = "Creates a JAR containing all main sources"
+  classifier = 'sources' 
+  from sourceSets.main.allSource 
+}
+
+artifacts {
+  archives sourcesJar
+}
+
+compileGenJava {
+  dependsOn generateGrammarSource
+}
+
+clean {
+  dependsOn cleanGenerateGrammarSource
+}
+
+eclipseClasspath { 
+  dependsOn cleanEclipseClasspath 
+}
